@@ -1,0 +1,17 @@
+# build output
+/ddns
+/ddns.exe
+
+# editor files
+ddns-pki.code-workspace
+
+# local databases
+*.db
+
+# local key files
+validator.json
+owner.json
+demo-*.json
+
+# scratch
+.tmp-history/
