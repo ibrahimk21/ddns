@@ -90,15 +90,20 @@ func (c *Chain) setTip(tx *bolt.Tx, tip uint64) error {
 }
 
 func (c *Chain) Resolve(domain string) (*DomainRecord, error) {
-    var rec DomainRecord
+    var rec *DomainRecord
     err := c.db.View(func(tx *bolt.Tx) error {
         raw := tx.Bucket(stateBucket).Get([]byte(domain))
-        return json.Unmarshal(raw, &rec)
+        if raw == nil {
+            return nil
+        }
+        var out DomainRecord
+        if err := json.Unmarshal(raw, &out); err != nil {
+            return err
+        }
+        rec = &out
+        return nil
     })
-    if err != nil {
-        return nil, err
-    }
-    return &rec, nil
+    return rec, err
 }
 
 func (c *Chain) Status() (map[string]any, error) {
