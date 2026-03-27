@@ -36,6 +36,7 @@ func (s *Server) Routes() http.Handler {
     mux.HandleFunc("/rpc", s.handleRPC)
     mux.HandleFunc("/resolve/", s.handleResolve)
     mux.HandleFunc("/status", s.handleStatus)
+    mux.HandleFunc("/verify", s.handleVerify)
     return mux
 }
 
@@ -137,4 +138,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
         return
     }
     writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+        return
+    }
+    if err := s.chain.VerifyImmutability(); err != nil {
+        writeJSON(w, http.StatusBadRequest, map[string]string{"ok": "false", "error": err.Error()})
+        return
+    }
+    writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
