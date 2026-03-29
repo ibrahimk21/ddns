@@ -2,6 +2,7 @@ package main
 
 import (
     "bytes"
+    "encoding/binary"
     "encoding/json"
     "errors"
     "flag"
@@ -10,6 +11,7 @@ import (
     "net/http"
     "os"
     "strings"
+    "unicode/utf16"
 
     "ddns-pki/internal/core"
     "ddns-pki/internal/node"
@@ -83,6 +85,7 @@ func loadKey(path string) (*keyFile, error) {
     if err != nil {
         return nil, err
     }
+    raw = normalizeJSONBytes(raw)
     var k keyFile
     if err := json.Unmarshal(raw, &k); err != nil {
         return nil, err
@@ -91,6 +94,30 @@ func loadKey(path string) (*keyFile, error) {
         return nil, errors.New("invalid key file")
     }
     return &k, nil
+}
+
+func normalizeJSONBytes(raw []byte) []byte {
+    if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
+        return raw[3:]
+    }
+    if len(raw) >= 2 && raw[0] == 0xFF && raw[1] == 0xFE {
+        return utf16ToUTF8(raw[2:], binary.LittleEndian)
+    }
+    if len(raw) >= 2 && raw[0] == 0xFE && raw[1] == 0xFF {
+        return utf16ToUTF8(raw[2:], binary.BigEndian)
+    }
+    return raw
+}
+
+func utf16ToUTF8(raw []byte, order binary.ByteOrder) []byte {
+    if len(raw)%2 != 0 {
+        raw = raw[:len(raw)-1]
+    }
+    u16 := make([]uint16, 0, len(raw)/2)
+    for i := 0; i < len(raw); i += 2 {
+        u16 = append(u16, order.Uint16(raw[i:i+2]))
+    }
+    return []byte(string(utf16.Decode(u16)))
 }
 
 func runServe(args []string) error {
