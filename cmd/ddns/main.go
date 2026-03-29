@@ -38,6 +38,12 @@ func main() {
         err = runSubmit(os.Args[2:], core.TxRegister)
     case "update":
         err = runSubmit(os.Args[2:], core.TxUpdate)
+    case "resolve":
+        err = runResolve(os.Args[2:])
+    case "status":
+        err = runStatus(os.Args[2:])
+    case "verify":
+        err = runVerify(os.Args[2:])
     default:
         printUsage()
         os.Exit(1)
@@ -56,6 +62,9 @@ func printUsage() {
     fmt.Println("  serve --addr :8080 --db chain.db --validator-key validator.json --validators <pub1,pub2,pub3>")
     fmt.Println("  register --rpc http://localhost:8080/rpc --key owner.json --domain example.com --ip 1.2.3.4 --ttl 3600 --version 1")
     fmt.Println("  update --rpc http://localhost:8080/rpc --key owner.json --domain example.com --ip 5.6.7.8 --ttl 3600 --version 2")
+    fmt.Println("  resolve --url http://localhost:8080/resolve/example.com")
+    fmt.Println("  status --url http://localhost:8080/status")
+    fmt.Println("  verify --url http://localhost:8080/verify")
 }
 
 func runKeygen() error {
@@ -171,12 +180,58 @@ func runSubmit(args []string, txType core.TxType) error {
     return postAndPrint(*rpcURL, req)
 }
 
+func runResolve(args []string) error {
+    fs := flag.NewFlagSet("resolve", flag.ContinueOnError)
+    url := fs.String("url", "http://localhost:8080/resolve/example.com", "resolve endpoint")
+    if err := fs.Parse(args); err != nil {
+        return err
+    }
+    return getAndPrint(*url)
+}
+
+func runStatus(args []string) error {
+    fs := flag.NewFlagSet("status", flag.ContinueOnError)
+    url := fs.String("url", "http://localhost:8080/status", "status endpoint")
+    if err := fs.Parse(args); err != nil {
+        return err
+    }
+    return getAndPrint(*url)
+}
+
+func runVerify(args []string) error {
+    fs := flag.NewFlagSet("verify", flag.ContinueOnError)
+    url := fs.String("url", "http://localhost:8080/verify", "verify endpoint")
+    if err := fs.Parse(args); err != nil {
+        return err
+    }
+    return getAndPrint(*url)
+}
+
 func postAndPrint(url string, payload any) error {
     raw, err := json.Marshal(payload)
     if err != nil {
         return err
     }
     resp, err := http.Post(url, "application/json", bytes.NewReader(raw))
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return err
+    }
+    var pretty bytes.Buffer
+    if err := json.Indent(&pretty, body, "", "  "); err == nil {
+        fmt.Println(pretty.String())
+    } else {
+        fmt.Println(string(body))
+    }
+    return nil
+}
+
+func getAndPrint(url string) error {
+    resp, err := http.Get(url)
     if err != nil {
         return err
     }
