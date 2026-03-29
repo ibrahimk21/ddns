@@ -173,8 +173,7 @@ func (c *Chain) SubmitSignedTransaction(txIn Transaction) (*Block, error) {
             if existing.OwnerPub != txIn.OwnerPub {
                 return errors.New("update signer does not match domain owner")
             }
-            // BUG: '<' allows replaying the same version; tightened to '<=' in commit 19.
-            if txIn.Version < existing.Version {
+            if txIn.Version <= existing.Version {
                 return errors.New("update version must increase")
             }
         default:
