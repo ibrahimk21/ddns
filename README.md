@@ -32,6 +32,14 @@ go mod tidy
 go build ./cmd/ddns
 ```
 
+## Testing
+
+Run unit tests (core logic + server handlers):
+
+```bash
+go test ./...
+```
+
 ## Quick Start
 
 1) Generate validator key:

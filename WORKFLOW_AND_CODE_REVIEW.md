@@ -37,6 +37,12 @@ From project root:
 & "C:\Program Files\Go\bin\go.exe" build -o ddns.exe ./cmd/ddns
 ~~~
 
+Run unit tests:
+
+~~~powershell
+& "C:\Program Files\Go\bin\go.exe" test ./...
+~~~
+
 Generate keys in UTF-8 safely:
 
 ~~~powershell
@@ -270,108 +276,90 @@ You have a valid implementation if all of these are true:
 6. Duplicate registration fails.
 7. Verify endpoint returns ok true.
 
-## 8. Code review summary by file
+## 8. Code walkthrough (interview-friendly)
 
-## 8.1 cmd/ddns/main.go
+## 8.1 The data model (what is stored)
 
-Purpose:
-- CLI entrypoint and command routing.
+The core types are in internal/core/types.go:
 
-Key behavior:
-- Parses commands: keygen, serve, register, update, resolve, status, verify.
-- Reads key files and normalizes encoding (UTF-8 BOM + UTF-16 LE/BE supported).
-- Creates signed transactions locally before submission.
-- Sends JSON-RPC requests and prints pretty JSON responses.
+- Transaction: the signed intent to register or update a domain.
+- DomainRecord: the resolved state for a domain (current truth).
+- Block: the append-only history entry that wraps a transaction.
 
-Why relevant:
-- This is user-facing orchestration.
-- The UTF-16 normalization fixes common PowerShell file encoding issues.
+Important detail: transactions are signed over a canonical view that excludes
+the signature field. That prevents signature self-reference and ensures the
+payload is deterministic across implementations.
 
-## 8.2 internal/core/types.go
+## 8.2 Cryptography and signing flow
 
-Purpose:
-- Canonical protocol models.
+internal/core/crypto.go provides:
 
-Key behavior:
-- Defines Transaction, DomainRecord, Block.
-- Defines transaction signing view that excludes signature field.
-- Provides deterministic signing payload creation.
+- Ed25519 key generation.
+- SignHex / VerifyHex for hex-encoded keys and signatures.
+- SHA256Hex for block hashing.
 
-Why relevant:
-- Signing the canonical payload is the foundation for authorization checks.
+Signing flow in practice:
+1) CLI builds a Transaction with domain, IP, TTL, owner public key, version.
+2) It calls SigningBytes() to get canonical bytes.
+3) It signs those bytes with the owner private key.
+4) The signature is attached to the Transaction and submitted.
 
-## 8.3 internal/core/crypto.go
+## 8.3 Validation gates (input quality)
 
-Purpose:
-- Cryptographic primitives.
+internal/core/validation.go blocks bad input early:
 
-Key behavior:
-- Generates Ed25519 keypairs.
-- Signs bytes with private key.
-- Verifies signatures with public key.
-- Hashes data via SHA-256.
+- Domain rules (label length, hyphen edges, must have a TLD).
+- IPv4 parsing only (A-record only).
+- TTL bounds (60..86400).
+- Timestamp skew window to avoid far-future or stale payloads.
 
-Why relevant:
-- All PKI ownership and anti-spoofing guarantees depend on this.
+This keeps malformed or unsafe data from reaching consensus logic.
 
-## 8.4 internal/core/validation.go
+## 8.4 State machine and persistence
 
-Purpose:
-- Input and transaction shape validation.
+internal/core/chain.go is the core engine:
 
-Key behavior:
-- Validates domain syntax and label rules.
-- Validates IPv4 format.
-- Enforces TTL bounds and timestamp skew window.
-- Restricts transaction type to REGISTER and UPDATE.
+- BoltDB stores two buckets:
+  - blocks: immutable chain history
+  - state: current DomainRecord per domain
+- SubmitSignedTransaction does all checks and state updates atomically:
+  - validates shape and owner signature
+  - enforces register vs update rules
+  - enforces monotonic versioning (no stale updates)
+  - creates block hash and validator signature
+  - persists block + updates state in one DB transaction
 
-Why relevant:
-- Prevents malformed or stale payloads from entering consensus logic.
+VerifyImmutability replays the chain to prove:
+- prev-hash linkage is intact
+- block signatures and transaction signatures are valid
+- validators are authorized
 
-## 8.5 internal/core/chain.go
+## 8.5 Network API surface
 
-Purpose:
-- Ledger state machine + persistence + immutability verification.
+internal/node/server.go exposes two interfaces:
 
-Key behavior:
-- Initializes BoltDB buckets for blocks, state, metadata.
-- Maintains chain tip.
-- Applies signed transactions atomically in DB write transaction.
-- Enforces registration/update authorization and version rules.
-- Creates block hash and validator block signature.
-- Persists block and resulting domain state.
-- Verifies full chain linkage and signatures in VerifyImmutability.
+- JSON-RPC /rpc:
+  - submitTx (state-changing)
+  - resolve and status (read-only)
+- REST:
+  - GET /resolve/{domain}
+  - GET /status
+  - GET /verify (immutability check)
 
-Why relevant:
-- This file is the core security and correctness engine.
+This separation makes it easy to script demo flows while keeping
+state-changing operations explicit through JSON-RPC.
 
-## 8.6 internal/node/server.go
+## 8.6 CLI orchestration
 
-Purpose:
-- Network API surface.
+cmd/ddns/main.go wires everything together:
 
-Key behavior:
-- Exposes JSON-RPC endpoint for submitTx/resolve/status.
-- Exposes REST endpoints: resolve, status, verify.
-- Maps API calls to chain operations and returns JSON responses.
+- keygen creates owner/validator keys.
+- serve starts the node and opens the chain DB.
+- register/update build and sign transactions, then POST to /rpc.
+- resolve/status/verify call the REST endpoints.
+- Key files are normalized to handle UTF-8 BOM and UTF-16 from PowerShell.
 
-Why relevant:
-- This is how external clients interact with ledger and state.
-
-## 9. Architecture notes in plain terms
-
-- The state is current truth per domain in the state bucket.
-- The blocks bucket is historical evidence of all accepted updates.
-- A valid update must pass both:
-  - owner signature verification, and
-  - ownership/version state rules.
-- Immutability check replays trust assumptions from stored data:
-  - prev hash linkage,
-  - authorized validator,
-  - valid validator signature,
-  - valid transaction signature.
-
-## 10. Known limitations of this MVP
+## 9. Known limitations of this MVP
 
 - Single-process node behavior, not full peer-to-peer sync yet.
 - No domain expiration lifecycle.
@@ -381,7 +369,7 @@ Why relevant:
 
 These are acceptable for a minimal resume project because the core decentralized DNS + PKI security path is implemented and demonstrable.
 
-## 11. Suggested resume demo script
+## 10. Suggested resume demo script
 
 1. Start server.
 2. Register example.com.
